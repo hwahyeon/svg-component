@@ -6,17 +6,23 @@ module Svg
   module Component
     class Error < StandardError; end
 
-    # Render an SVG file with optional HTML attributes
+    # Render an SVG file with optional attributes, sanitization, and viewBox auto-generation
     #
-    # @param [String] path - The path to the SVG file
-    # @param [Hash] options - Supported options: :class, :title, :width, :height
-    # @return [String] SVG content with applied attributes, or fallback comment
+    # @param [String] path - Path to the SVG file
+    # @param [Hash] options - Supported options: :class, :width, :height, :title, :sanitize (true to enable)
+    # @return [String] SVG content with applied attributes
     def self.render(path, options = {})
       return "<!-- SVG file not found -->" unless File.exist?(path)
 
       svg = File.read(path)
 
-      # Modify <svg ...> tag with new attributes
+      # Remove <script> tags only if sanitize: true is explicitly provided
+      svg.gsub!(/<script.*?>.*?<\/script>/m, "") if options[:sanitize] == true
+
+      special_keys = [:title, :sanitize]
+      regular_attrs = options.reject { |k, _| special_keys.include?(k) }
+
+      # Modify <svg> tag with new attributes
       svg.sub!(/<svg([^>]*)>/) do
         attrs = Regexp.last_match(1)
 
@@ -26,18 +32,25 @@ module Svg
         attrs = attrs.gsub(/\sheight="[^"]*"/, "") if options[:height]
 
         # Build new attributes
-        new_attrs = []
-        new_attrs << "class=\"#{options[:class]}\"" if options[:class]
-        new_attrs << "width=\"#{options[:width]}\"" if options[:width]
-        new_attrs << "height=\"#{options[:height]}\"" if options[:height]
+        new_attrs = regular_attrs.map { |k, v| "#{k}=\"#{v}\"" }
 
-        "<svg#{attrs} #{' ' unless attrs.strip.empty?}#{new_attrs.join(' ')}>"
+        tag = "<svg#{attrs} #{' ' unless attrs.strip.empty?}#{new_attrs.join(' ')}>"
+
+        # Auto-generate viewBox if missing and width/height are valid numbers
+        unless tag.include?("viewBox")
+          width = options[:width].to_s.gsub("px", "")
+          height = options[:height].to_s.gsub("px", "")
+
+          if width.match?(/^\d+$/) && height.match?(/^\d+$/)
+            tag.sub!(">", " viewBox=\"0 0 #{width} #{height}\">")
+          end
+        end
+
+        tag
       end
 
       # Insert <title> tag if provided
-      if options[:title]
-        svg.sub!(">", "><title>#{options[:title]}</title>")
-      end
+      svg.sub!(">", "><title>#{options[:title]}</title>") if options[:title]
 
       svg
     end
